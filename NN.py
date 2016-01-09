@@ -1,3 +1,4 @@
+import os
 import csv
 import time
 import pickle
@@ -10,17 +11,19 @@ from scipy import log, exp
 
 _check_grad_ = False
 _monitor_ = True
-_tuning_ = True
+_tuning_ = False
+
+train_valid_sep = 2000
 
 cost_hist = []
 
-tuning = (0, 3, 200)  # regular-factor, learning-rate, max-iter
+tuning = (0, 0.1, 5000)  # regular-factor, learning-rate, max-iter
 reg_factor = tuning[0]
 sample_size = 0
 init_range = 1
 learning_rate = tuning[1]
 input_layer_num = 784
-hidden_layer_num = 49
+hidden_layer_num = 784
 output_layer_num = 10
 param_num = (input_layer_num + 1) * hidden_layer_num + (hidden_layer_num + 1) * output_layer_num
 
@@ -63,11 +66,16 @@ def load_test():
 
 
 def param_init(size):
-    res = np.array(np.ones([size, 1]))
-    rd.seed(1)
-    for ii in res:
-        ii *= rd.random()
-    return res * init_range - init_range * 0.5
+    if os.path.exists("init_param"):
+        with open("init_param", "rb") as f:
+            result, cost_hist, _, _ = pickle.load(f)
+        return result.x
+    else:
+        res = np.array(np.ones([size, 1]))
+        rd.seed(2)
+        for ii in res:
+            ii *= rd.random()
+        return res * init_range - init_range * 0.5
 
 
 def nn_cost_func(param, xx, yy, reg_factor=0):
@@ -105,6 +113,8 @@ def nn_cost_func(param, xx, yy, reg_factor=0):
 
 def predict(param, xx):
     m, _ = xx.shape
+    if m == 0:
+        return np.array(None) 
     theta1 = param[:(input_layer_num + 1) * hidden_layer_num].reshape(input_layer_num + 1,
                                                                       hidden_layer_num).copy()
     theta2 = param[(input_layer_num + 1) * hidden_layer_num:].reshape(hidden_layer_num + 1,
@@ -155,8 +165,8 @@ def learning_curve(max_count, step=1):
 
 if __name__ == "__main__" and not _check_grad_:
     x, y = load_train()
-    xv, yv = x[:40000, :], y[:40000]
-    x, y = x[40000:, :], y[40000:]
+    xv, yv = x[:train_valid_sep, :], y[:train_valid_sep]
+    x, y = x[train_valid_sep:, :], y[train_valid_sep:]
     xt = load_test()
     print "Loaded Data"
     nn_param = param_init(param_num)
@@ -176,7 +186,7 @@ if __name__ == "__main__" and not _check_grad_:
         print "Validation Accuracy:", (predict(result.x, xv) == yv).mean()
         print result
         with open("model", "wb") as f:
-            pickle.dump((result, cost_hist), f)
+            pickle.dump((result, cost_hist, (predict(result.x, x) == y).mean(), (predict(result.x, xv) == yv).mean(), hidden_layer_num), f)
 
 if _check_grad_:
     print "check grad"
