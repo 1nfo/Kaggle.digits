@@ -23,9 +23,10 @@ sample_size = 0
 init_range = 1
 learning_rate = tuning[1]
 input_layer_num = 784
-hidden_layer_num = 784
+hidden_layer_num = 400
 output_layer_num = 10
-param_num = (input_layer_num + 1) * hidden_layer_num + (hidden_layer_num + 1) * output_layer_num
+param_num = (input_layer_num + 1) * hidden_layer_num + \
+            hidden_layer_num * (hidden_layer_num + 1) + (hidden_layer_num + 1) * output_layer_num
 
 
 class Timer(object):
@@ -42,14 +43,14 @@ class Timer(object):
 
 
 def load(path):
-    with open(path, "rb") as f:
+    with open(path, "rb") as ff:
         data = []
-        csv_r = csv.reader(f)
-        count = 0
+        csv_r = csv.reader(ff)
+        cc = 0
         for line in csv_r:
             data.append(line)
-            count += 1
-            if count > sample_size and sample_size:
+            cc += 1
+            if cc > sample_size and sample_size:
                 break
     return pd.DataFrame(data[1:])
 
@@ -67,9 +68,9 @@ def load_test():
 
 def param_init(size):
     if os.path.exists("init_param"):
-        with open("init_param", "rb") as f:
-            result, cost_hist, _, _ = pickle.load(f)
-        return result.x
+        with open("init_param", "rb") as ff:
+            res, cost_history, _, _ = pickle.load(ff)
+        return res.x
     else:
         res = np.array(np.ones([size, 1]))
         rd.seed(2)
@@ -81,50 +82,58 @@ def param_init(size):
 def nn_cost_func(param, xx, yy, reg_factor=0):
     # parameter setting
     m, _ = xx.shape
-    theta1 = param[:(input_layer_num + 1) * hidden_layer_num].reshape(input_layer_num + 1,
-                                                                      hidden_layer_num).copy()
-    theta2 = param[(input_layer_num + 1) * hidden_layer_num:].reshape(hidden_layer_num + 1,
-                                                                      output_layer_num).copy()
+    sep1 = (input_layer_num + 1) * hidden_layer_num
+    sep2 = (hidden_layer_num + 1) * hidden_layer_num
+    theta1 = param[:sep1].reshape(input_layer_num + 1, hidden_layer_num).copy()
+    theta2 = param[sep1:sep1 + sep2].reshape(hidden_layer_num + 1, hidden_layer_num).copy()
+    theta3 = param[sep1 + sep2:].reshape(hidden_layer_num + 1, output_layer_num).copy()
     # forward
     a1 = np.column_stack((np.ones((m, 1)), np.array(xx, dtype=int)))
     z2 = np.dot(a1, theta1)
     a2 = np.column_stack((np.ones((m, 1)), activated_func(z2)))
     z3 = np.dot(a2, theta2)
-    a3 = activated_func(z3)
+    a3 = np.column_stack((np.ones((m, 1)), activated_func(z3)))
+    z4 = np.dot(a3, theta3)
+    a4 = activated_func(z4)
     y_mat = np.zeros([m, output_layer_num])
     for ii in xrange(len(yy)):
         y_mat[ii, yy[ii]] = 1
-    tmp = -y_mat * log(a3) - (1 - y_mat) * log(1 - a3)
+    tmp = -y_mat * log(a4) - (1 - y_mat) * log(1 - a4)
     tmp2 = sum(sum(tmp))
     regularization = reg_factor * np.dot(param.T, param) / 2
     j_cost = tmp2 + regularization
     j_cost /= m
     # backward
-    delta3 = a3 - y_mat
+    delta4 = a4 - y_mat
+    delta3 = np.dot(delta4, theta3[1:, :].T) * activated_func(z3) * (1 - activated_func(z3))
     delta2 = np.dot(delta3, theta2[1:, :].T) * activated_func(z2) * (1 - activated_func(z2))
-
     theta1[:, 0] = 0
     theta2[:, 0] = 0
+    theta3[:, 0] = 0
     theta1_grad = (np.dot(a1.T, delta2) + reg_factor * theta1) / m
     theta2_grad = (np.dot(a2.T, delta3) + reg_factor * theta2) / m
-    grad = np.hstack([theta1_grad.flatten(), theta2_grad.flatten()])
+    theta3_grad = (np.dot(a3.T, delta4) + reg_factor * theta3) / m
+    grad = np.hstack([theta1_grad.flatten(), theta2_grad.flatten(), theta3_grad.flatten()])
     return j_cost, grad * learning_rate
 
 
 def predict(param, xx):
     m, _ = xx.shape
     if m == 0:
-        return np.array(None) 
-    theta1 = param[:(input_layer_num + 1) * hidden_layer_num].reshape(input_layer_num + 1,
-                                                                      hidden_layer_num).copy()
-    theta2 = param[(input_layer_num + 1) * hidden_layer_num:].reshape(hidden_layer_num + 1,
-                                                                      output_layer_num).copy()
+        return np.array(None)
+    sep1 = (input_layer_num + 1) * hidden_layer_num
+    sep2 = (hidden_layer_num + 1) * hidden_layer_num
+    theta1 = param[:sep1].reshape(input_layer_num + 1, hidden_layer_num).copy()
+    theta2 = param[sep1:sep1 + sep2].reshape(hidden_layer_num + 1, hidden_layer_num).copy()
+    theta3 = param[sep1 + sep2:].reshape(hidden_layer_num + 1, output_layer_num).copy()
     a1 = np.column_stack((np.ones((m, 1)), np.array(xx, dtype=int)))
     z2 = np.dot(a1, theta1)
     a2 = np.column_stack((np.ones((m, 1)), activated_func(z2)))
     z3 = np.dot(a2, theta2)
     a3 = activated_func(z3)
-    return a3.argmax(1)
+    z4 = np.dot(a3, theta3)
+    a4 = activated_func(z4)
+    return a4.argmax(1)
 
 
 def activated_func(z):
@@ -186,11 +195,12 @@ if __name__ == "__main__" and not _check_grad_:
         print "Validation Accuracy:", (predict(result.x, xv) == yv).mean()
         print result
         with open("model", "wb") as f:
-            pickle.dump((result, cost_hist, (predict(result.x, x) == y).mean(), (predict(result.x, xv) == yv).mean(), hidden_layer_num), f)
+            pickle.dump((result, cost_hist, (predict(result.x, x) == y).mean(), (predict(result.x, xv) == yv).mean(),
+                         hidden_layer_num), f)
 
 if _check_grad_:
     print "check grad"
-    chk_num = 1000
+    chk_num = 1
     x, y = load_train()
     nn_param = param_init(param_num)
     new_param = np.array(np.zeros([param_num, 1]))
