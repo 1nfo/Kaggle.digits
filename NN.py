@@ -13,7 +13,7 @@ _check_grad_ = False
 _monitor_ = True
 _tuning_ = False
 
-train_valid_sep = 2000
+train_valid_sep = 0
 
 cost_hist = []
 
